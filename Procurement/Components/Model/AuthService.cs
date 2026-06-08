@@ -13,21 +13,25 @@ using System.Text.Json;
 
 public class AuthService : IAuthService
 {
-    private readonly HttpClient _httpClient;
-    private readonly string _apiKey = "AIzaSyCkRMLxMREXtSnzAzax-KP1LXjQh8hUcvo";
-    private readonly FirestoreDb _db = FirestoreDb.Create("procurement-ed5cc");
+    private readonly HttpClient _httpClient;    
+    private readonly string _apiKey ;    
+    private readonly FirestoreDb _db ;
     private readonly FirebaseAuthProvider _authProvider;
     private readonly FirebaseAuth auth;
     private readonly IJSRuntime _js;
     public event Action<string, bool>? OnNotification; 
+    public IConfiguration Configuration { get; set; }
 
     public virtual User CurrentUser { get; set; }
     public string CurrentUserToken { get; set; }
 
-    public AuthService(HttpClient httpClient, IJSRuntime js)
+    public AuthService(HttpClient httpClient, IJSRuntime js, IConfiguration configuration)
     {
+        Configuration = configuration;
         _httpClient = httpClient;
         _js = js;
+        _apiKey = Configuration["Firebase:ApiKey"];
+        _db= FirestoreDb.Create(Configuration["Firebase:DB"]);
     }
 
     private void Notify(string message, bool isError = false)
