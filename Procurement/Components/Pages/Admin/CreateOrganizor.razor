@@ -1,0 +1,297 @@
+﻿@page "/createOrganizor"
+@using Procurement.Components.Model
+@using System.IO
+@inject AuthService AuthService
+@inject NavigationManager Nav
+
+
+<div class="design-wrapper">
+    <div class="design-card wide-card">
+        @* HEADER AND CSV ACTIONS *@
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3 class="form-title mb-0">Organizer Management</h3>
+            <div class="d-flex gap-2">
+                <InputFile OnChange="HandleCsvUpload" class="d-none" id="csvImport" />
+                <label for="csvImport" class="btn-outline-custom mb-0" style="cursor:pointer">
+                    <i class="bi bi-file-earmark-spreadsheet me-2"></i> Import CSV
+                </label>
+            </div>
+        </div>
+
+        @* CREATE FORM - Condensed *@
+        <EditForm Model="regModel" OnValidSubmit="HandleRegistration">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <div class="input-group-custom">
+                        <label>Email</label>
+                        <InputText @bind-Value="regModel.Email" class="custom-input" placeholder="email@example.com" />
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="input-group-custom">
+                        <label>First Name</label>
+                        <InputText @bind-Value="regModel.FirstName" class="custom-input" />
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="input-group-custom">
+                        <label>Last Name</label>
+                        <InputText @bind-Value="regModel.LastName" class="custom-input" />
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="input-group-custom">
+                        <label>Password</label>
+                        <InputText @bind-Value="regModel.Password" type="password" class="custom-input" />
+                    </div>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn-action w-100">ADD</button>
+                </div>
+            </div>
+        </EditForm>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger mt-3">@errorMessage</div>
+        }
+
+        @* SEARCH BAR SECTION *@
+        <div class="d-flex justify-content-between align-items-center mt-5 mb-3">
+            <h5 class="section-subtitle mb-0">Existing Organizers</h5>
+            <div class="search-container" style="width: 300px;">
+                <div class="input-group-custom">
+                    <input type="text" @bind="searchTerm" @bind:event="oninput"
+                           placeholder="Search by name or email..."
+                           class="custom-input search-input" />
+                </div>
+            </div>
+        </div>
+
+        @* TABLE SECTION *@
+        <div class="table-responsive">
+            <table class="table custom-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Organization</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var user in FilteredOrganizers)
+                    {
+                        <tr>
+                            <td>@user.FirstName @user.LastName</td>
+                            <td>@user.Email</td>
+                            <td><span class="badge-custom">@user.Organization</span></td>
+                            <td class="text-end">
+                                <button class="btn-table-action me-2" @onclick="() => OpenEditModal(user)">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn-table-action text-danger" @onclick="() => DeleteUser(user.ID)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* EDIT USER MODAL *@
+@if (isEditModalOpen)
+{
+    <div class="custom-modal-container">
+        <div class="modal-backdrop-blur" @onclick="CloseEditModal"></div>
+        <div class="modal-content-wrapper">
+            <div class="design-card modal-card" @onclick:stopPropagation="true">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h3 class="form-title mb-0">Edit Organizer</h3>
+                    <button type="button" class="btn-close-custom" @onclick="CloseEditModal">&times;</button>
+                </div>
+
+                <EditForm Model="editingUser" OnValidSubmit="SaveUserEdit">
+                    <div class="input-group-custom mb-3">
+                        <label>Email Address</label>
+                        <InputText @bind-Value="editingUser.Email" class="custom-input" />
+                    </div>
+                    <div class="input-group-custom mb-3">
+                        <label>Email Address</label>
+                        <InputText @bind-Value="editingUser.Organization" class="custom-input" />
+                    </div>
+                    <div class="input-group-custom mb-3">
+                        <label>First Name</label>
+                        <InputText @bind-Value="editingUser.FirstName" class="custom-input" />
+                    </div>
+                    <div class="input-group-custom mb-4">
+                        <label>Last Name</label>
+                        <InputText @bind-Value="editingUser.LastName" class="custom-input" />
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn-secondary-custom" @onclick="CloseEditModal">CANCEL</button>
+                        <button type="submit" class="btn-action">SAVE CHANGES</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+}
+
+@code {
+    //@inject IUserController uc
+    private User regModel = new();
+    private List<User> organizers = new();
+    private string? errorMessage;
+    private UserController uc = new UserController();
+    //[Inject] private UserController uc { get; set; }
+
+    // Modal State
+    private bool isEditModalOpen = false;
+    private User editingUser = new();
+
+    private string searchTerm = "";
+
+    // Calculated Property for Filtering
+    private IEnumerable<User> FilteredOrganizers =>
+        string.IsNullOrWhiteSpace(searchTerm)
+            ? organizers
+            : organizers.Where(u =>
+                (u.FirstName?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (u.LastName?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (u.Email?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+              );
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOrganizers();
+    }
+
+    private async Task LoadOrganizers()
+    {
+        organizers = await uc.GetUsersByRole("Organizor");
+    }
+
+    private async Task HandleRegistration()
+    {
+        await AuthService.RegisterAsync(regModel.Email, regModel.Password, "Organizor", "Global Tech", true, "", "", regModel.FirstName, regModel.LastName);
+        regModel = new();
+        await LoadOrganizers();
+    }
+        
+    private void OpenEditModal(User user)
+    {
+        // We create a copy so changes don't show in the table until we hit Save
+        editingUser = new User
+        {
+            ID = user.ID,
+            Email = user.Email,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Organization = user.Organization,
+            Role = user.Role,
+            Approved = user.Approved,
+            category = "",
+            fileName=""
+        };
+        isEditModalOpen = true;
+    }
+
+    private void CloseEditModal()
+    {
+        isEditModalOpen = false;
+        editingUser = new();
+    }
+
+    private async Task SaveUserEdit()
+    {
+        try
+        {
+            await uc.UpdateUserAsync(editingUser);
+            isEditModalOpen = false;
+            await LoadOrganizers();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Update failed: " + ex.Message;
+        }
+    }
+
+    private async Task DeleteUser(string userID)
+    {
+        try
+        {
+            await uc.DeleteUserAsync(userID);
+            await LoadOrganizers();
+        }
+        catch(Exception ex)
+        {
+            errorMessage = $"Delete failed: {ex.Message}";
+        }
+    }
+
+    private async Task HandleCsvUpload(InputFileChangeEventArgs e)
+    {
+        errorMessage = null; 
+        try
+        {            
+            var file = e.File;
+            using var stream = file.OpenReadStream(maxAllowedSize: 1024 * 1024);
+            using var reader = new StreamReader(stream);
+
+            var registrationTasks = new List<Task>();
+            var tasks = new List<Task<(bool Success, string Error)>>();
+            var registrationErrors = new List<string>();
+
+            while (await reader.ReadLineAsync() is string line)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                line = line.Trim('\uFEFF', '\u200B').Trim();
+
+                if (line.StartsWith("PK"))
+                {
+                    errorMessage = "Error: This appears to be an Excel Workbook (.xlsx). Please save it as a CSV and try again.";
+                    return;
+                }
+                var parts = line.Split(',');
+                if (parts.Length >= 4)
+                {
+                    var email = parts[0].Trim();
+                    var password = parts[1].Trim();
+                    var firstName = parts[2].Trim();
+                    var lastName = parts[3].Trim();
+                    
+                    //registrationTasks.Add(AuthService.RegisterAsync(email,password,"Organizor","Global Tech",true,"","",firstName,lastName));
+                    tasks.Add(AuthService.RegisterAsync(email, password, "Organizor", "Global Tech", true, "", "", firstName, lastName));
+                }
+            }
+            
+            //await Task.WhenAll(registrationTasks);
+            var results = await Task.WhenAll(tasks);
+
+            // Filter out the ones that failed and add them to our error list
+            foreach (var result in results.Where(r => !r.Success))
+            {
+                registrationErrors.Add($"{result.Error}");
+            }
+
+            if (registrationErrors.Any())
+            {
+                errorMessage = "Some registrations failed: " + string.Join(" | ", registrationErrors);
+            }
+            
+            await LoadOrganizers();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error reading CSV: {ex.Message}";
+        }
+    }
+
+    
+}

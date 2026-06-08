@@ -1,0 +1,211 @@
+﻿@page "/bidsOrganizor"
+@using Google.Cloud.Firestore
+@using Procurement.Components.Model
+@using Firebase.Storage
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@inject BidTracker bidTracker
+@inject AuthService authService
+
+<div class="design-wrapper">
+    <div class="design-card table-card">
+        <div class="close-icon" @onclick='() => Nav.NavigateTo("/")'>&times;</div>
+        <h3 class="form-title">Available Bids Management</h3>
+
+        @if (bids == null)
+        {
+            <div class="loading-state">
+                <div class="spinner-border text-info" role="status"></div>
+                <p>Loading bids from Firestore...</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table custom-table">
+                    <thead>
+                        <tr>
+                            <th>Description</th>
+                            <th>Category</th>
+                            <th>Due Date</th>
+                            <th>Status</th>
+                            <th>Public</th>
+                            <th class="text-center">Document</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var bid in bids)
+                        {
+                            <tr>
+                                <td class="fw-bold">@bid.Description</td>
+                                <td><span class="badge-custom">@bid.Category</span></td>
+                                <td class="text-muted">@bid.dueDate.ToShortDateString()</td>
+                                <td>
+                                    @if (bid.open)
+                                    {
+                                        <span class="status-open">Open</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-closed">Closed</span>
+                                    }
+                                </td>
+                                <td>@(bid.Public ? "Yes" : "No")</td>
+                                <td class="text-center">
+                                    @if (!string.IsNullOrEmpty(bid.PdfUrl))
+                                    {
+                                        <a href="@bid.PdfUrl" target="_blank" class="btn-table-action">
+                                            <i class="bi bi-file-earmark-pdf"></i> View
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small italic">None</span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn-action-small" @onclick="() => viewOffer(bid)">
+                                        VIEW OFFERS
+                                    </button>
+                                    
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="error-tooltip">@errorMessage</div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private List<Bid> bids= new List<Bid>();
+    private string errorMessage = "";
+    private FirestoreDb _db ;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        await loadBids();
+        await loadPDFs();
+    }
+
+    private async Task loadBids()
+    {
+
+        try
+        {
+            var snapshot = await _db.Collection("Bids").GetSnapshotAsync();
+            var bidList = new List<Bid>();
+            BidController bc = new BidController();
+
+            foreach (var d in snapshot.Documents)
+            {
+                // 1. Extract values safely
+                var id = d.GetValue<string>("Id");
+                var dueDate = d.GetValue<DateTime>("dueDate");
+                var isCurrentlyOpen = d.GetValue<bool>("Open");
+
+                // Check if the deadline has passed, If the current time is greater than the due date, it should be closed
+                bool shouldBeOpen = DateTime.Now <= dueDate;
+
+
+                if (isCurrentlyOpen && !shouldBeOpen)
+                {
+
+                    await d.Reference.UpdateAsync("Open", false);
+                    isCurrentlyOpen = false; 
+                }
+
+                
+                /*
+                bidList.Add(new Bid
+                {
+                    Id = id,
+                    Description = d.GetValue<string>("Description"),
+                    Category = d.GetValue<string>("Category"),
+                    open = isCurrentlyOpen,
+                    Published = d.GetValue<bool>("Published"),
+                    Public = d.GetValue<bool>("Public"),
+                    dueDate = dueDate,
+                    fileName = d.GetValue<string>("fileName")
+                });
+                */
+            }
+            bidList = await bc.getAllBids();
+
+            bids = bidList;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading/updating bids: {ex.Message}");
+        }
+    }
+
+
+    private async Task loadPDFs()
+    {
+        var bucket = Config["Firebase:Bucket"];
+
+
+        var storage = new FirebaseStorage(bucket, new FirebaseStorageOptions
+        {
+            AuthTokenAsyncFactory = () => Task.FromResult(authService.CurrentUserToken)
+        });
+
+        foreach (Bid bid in bids)
+        {
+            try
+            {
+                bid.PdfUrl = await storage
+                .Child("Bids")
+                .Child(bid.Id)                
+                .Child(bid.fileName)
+                .GetDownloadUrlAsync();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+        }
+
+    }
+    /*
+    private async void viewOffer(Bid bid)
+    {
+        if (!bid.open)
+        {
+            bidTracker.setCurrentBidId(bid.Id);
+            Nav.NavigateTo("/bidDetails");
+        }
+        else
+        {
+            errorMessage = "you can not view the offers while the bid is still open";
+        }        
+
+    }
+    */
+    private async Task viewOffer(Bid bid)
+    {
+        // Check if the bid is closed before allowing review
+        if (!bid.open)
+        {
+            errorMessage = ""; // Clear any previous error
+            bidTracker.setCurrentBidId(bid.Id);
+
+            // Navigate to the comprehensive review page we designed earlier
+            Nav.NavigateTo("/reviewOffers");
+        }
+        else
+        {
+            errorMessage = "Security Policy: You cannot view offers while the bid is still open to ensure a fair bidding process.";
+            StateHasChanged();
+        }
+    }
+    
+}

@@ -1,0 +1,247 @@
+﻿@page "/register"
+@using Google.Cloud.Firestore
+@using Procurement.Components.Model
+@inject AuthService AuthService
+@inject NavigationManager Nav
+@inject FileService FileService
+@inject IConfiguration Config
+@inject PDFValidatorService ValidatorService
+
+<div class="registration-wrapper">
+    <div class="registration-card">
+        <div class="close-icon">&times;</div>
+        <h3 class="form-title">Registration Form</h3>
+
+        <EditForm Model="regModel" OnValidSubmit="HandleRegistration">
+            <div class="input-group">
+                <label>Email address</label>
+                <InputText @bind-Value="regModel.Email" class="custom-input" />
+            </div>
+            <div class="input-group">
+                <label>First Name</label>
+                <InputText @bind-Value="regModel.FirstName" class="custom-input" />
+            </div>
+            <div class="input-group">
+                <label>Last Name</label>
+                <InputText @bind-Value="regModel.LastName" class="custom-input" />
+            </div>
+
+            <div class="input-group">
+                <label>Password</label>
+                <InputText @bind-Value="regModel.Password" type="password" class="custom-input" />
+            </div>
+
+            <div class="input-group">
+                <label>Organization</label>
+                <InputText @bind-Value="regModel.Organization" class="custom-input" />
+            </div>
+
+            <div class="input-group">
+                <label>Category</label>
+                <InputSelect @bind-Value="regModel.category" class="custom-input select-style">
+                    <option value="" disabled selected>Select Category</option>
+                    @if (categories != null)
+                    {
+                        @foreach (string cat in categories)
+                        {
+                            <option value="@cat">@cat</option>
+                        }
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="input-group-custom mb-4">
+                <label>Supporting Document (PDF)</label>
+                <InputFile OnChange="StoreFile" accept=".pdf" class="custom-input" />
+
+                @if (isUploading)
+                {
+                    <div class="custom-progress mt-2">
+                        <div class="custom-progress-bar"></div>
+                    </div>
+                }
+                @if (isProcessing)
+                {
+                    <div class="d-flex align-items-center text-primary mt-3">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                        <span>Gemini is analyzing your document...</span>
+                    </div>
+                }
+
+                @if (validationResult != null)
+                {
+                    <div class="mt-4 alert @(validationResult.Value.IsViable ? "alert-success" : "alert-danger")">
+                        <h5 class="alert-heading">
+                            @(validationResult.Value.IsViable ? "✅ Document Validated" : "❌ Validation Failed")
+                        </h5>
+                        <p class="mb-0">@validationResult.Value.Reason</p>
+                    </div>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="error-msg">
+                    @errorMessage
+                </div>
+            }
+
+            <button type="submit" class="btn-create">CREATE ACCOUNT</button>
+
+            <div class="login-link">
+                Already have an account? <a href="login">Sign in</a>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private User regModel = new();
+    private string? errorMessage;
+    private IBrowserFile file = null;
+    private List<string> categories = new List<string>();
+    private bool isUploading = false;
+    private string? uploadedUrl;
+    private FirestoreDb _db;
+
+    private string contextType = "License";
+    private bool isProcessing = false;
+    private (bool IsViable, string Reason)? validationResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        await GetCategoriesAsync();
+    }
+
+    private async Task HandleRegistration()
+    {
+        if (file!=null)
+        {
+            if (validationResult.Value.IsViable)
+            {
+                if (string.IsNullOrEmpty(regModel.Email) || string.IsNullOrEmpty(regModel.Password) || string.IsNullOrEmpty(regModel.Organization) || string.IsNullOrEmpty(regModel.category) || string.IsNullOrEmpty(regModel.Password) || string.IsNullOrEmpty(regModel.FirstName) || string.IsNullOrEmpty(regModel.LastName))
+                {
+                    errorMessage = "Please fill in all the fields to register";
+                    return;
+                }
+                var result = await AuthService.RegisterAsync(regModel.Email, regModel.Password, "Supplier", regModel.Organization, false, file.Name, regModel.category, regModel.FirstName, regModel.LastName);
+                if (result.Success)
+                {
+                    await HandleFileSelected();
+                    Nav.NavigateTo("/login");
+                }
+                else
+                {
+                    errorMessage = result.Error;
+                }
+            }
+            else
+            {
+                errorMessage = "You need to upload a viable supporting document to register";
+            }
+
+        }
+        else
+        {
+            errorMessage = "You need to upload supporting document for your company to register on this website";
+        }
+    }
+
+
+
+
+    private async Task StoreFile(InputFileChangeEventArgs e)
+    {
+        file = e.File;
+        if (file == null) return;
+        if (file.ContentType != "application/pdf")
+        {
+            errorMessage = "Invalid file type. Please upload a PDF.";            
+            file = null;
+            return;
+        }
+
+        isUploading = true;
+
+        // Open the stream 
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+        await validatePDF();
+    }
+
+    private async Task HandleFileSelected()
+    {        
+        if (file == null) return;
+
+        isUploading = true;
+
+        // Open the stream 
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+
+        try
+        {
+            regModel.fileName = file.Name;
+            uploadedUrl = await FileService.UploadPdfAsync($"{regModel.Email}/" + "register", stream, file.Name,AuthService.CurrentUserToken);
+            
+        }
+        catch (Exception ex)
+        {
+            // Log or handle error
+            Console.WriteLine(ex.Message);
+        }
+        finally
+        {
+            isUploading = false;
+        }
+
+    }
+
+    public async Task GetCategoriesAsync()
+    {
+        try
+        {
+            var snapshot = await _db.Collection("Categories").GetSnapshotAsync();
+            foreach (DocumentSnapshot document in snapshot.Documents)
+            {
+                categories.Add(document.GetValue<string>("name"));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
+
+    }
+    private async Task validatePDF()
+    {
+        if (file == null) return;
+
+        // Reset UI state
+        isProcessing = true;
+        validationResult = null;
+
+        try
+        {
+            // Limit file size (e.g., 5MB) to prevent memory issues
+            long maxFileSize = 1024 * 1024 * 5;
+
+            using var stream = file.OpenReadStream(maxFileSize);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            byte[] pdfBytes = ms.ToArray();
+
+
+            validationResult = await ValidatorService.CheckPdfViabilityAsync(pdfBytes, contextType, Config);
+        }
+        catch (Exception ex)
+        {
+            validationResult = (false, $"Error reading file: {ex.Message}");
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+    
+}

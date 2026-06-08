@@ -1,0 +1,249 @@
+﻿@page "/bidDetails"
+@using Google.Cloud.Firestore
+@using Procurement.Components.Model
+@inject NavigationManager Nav
+@inject FileService FileService
+@inject AuthService authService
+@inject IConfiguration Config
+@inject BidTracker bidTracker
+@using Firebase.Storage
+
+<div class="design-wrapper">
+    <div class="design-card wide-card">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3 class="form-title mb-0">Bid Management Details</h3>
+            <button class="btn-outline-custom" @onclick='() => Nav.NavigateTo("/bidsOrganizor")'>
+                <i class="bi bi-arrow-left me-2"></i> Back to List
+            </button>
+        </div>
+
+        @if (currentBid == null)
+        {
+            <div class="loading-state text-center p-5">
+                <div class="spinner-border text-info" role="status"></div>
+                <p class="mt-2 text-muted">Retrieving bid details...</p>
+            </div>
+        }
+        else
+        {
+            <div class="bid-info-banner mb-5">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <div class="d-flex align-items-center gap-3 mb-2">
+                            <span class="bid-id-tag">ID: @currentBid.Id</span>
+                            @if (currentBid.open)
+                            {
+                                <span class="status-open">Open</span>
+                            }
+                            else
+                            {
+                                <span class="status-closed">Closed</span>
+                            }
+                        </div>
+                        <h2 class="text-dark fw-bold mb-1">@currentBid.Description</h2>
+                        <span class="badge-custom">@currentBid.Category</span>
+                    </div>
+                    <div class="col-md-4 text-md-end border-start">
+                        <div class="mb-2">
+                            <small class="text-muted d-block">DUE DATE</small>
+                            <span class="fw-bold">@currentBid.dueDate.ToLongDateString()</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(currentBid.PdfUrl))
+                        {
+                            <a href="@currentBid.PdfUrl" target="_blank" class="btn-table-action mt-2">
+                                <i class="bi bi-file-pdf me-1"></i> View Requirements
+                            </a>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <h5 class="section-subtitle">Supplier Offers</h5>
+
+            @if (offers == null || offers.Count == 0)
+            {
+                <div class="empty-state text-center py-5">
+                    <i class="bi bi-inbox text-muted display-4"></i>
+                    <p class="text-muted mt-3">There are currently no offers made for this bid.</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table custom-table">
+                        <thead>
+                            <tr>
+                                <th>Supplier Email</th>
+                                <th>Organization</th>
+                                <th class="text-end">Proposal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var offer in offers)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <i class="bi bi-envelope-at me-2 text-primary"></i>
+                                            @offer.supplierEmail
+                                        </div>
+                                    </td>
+                                    <td><span class="badge-custom">@offer.Organization</span></td>
+                                    <td class="text-end">
+                                        @if (!string.IsNullOrEmpty(offer.pdfURL))
+                                        {
+                                            <a href="@offer.pdfURL" target="_blank" class="btn-action-small">
+                                                <i class="bi bi-file-earmark-pdf me-1"></i> VIEW OFFER
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small italic">No document</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private Bid currentBid = null;
+    private List<Offer> offers ;
+    private IBrowserFile file = null;
+    private bool isUploading = false;
+    private bool published = false;
+    private string selectedId = "";   
+    private FirestoreDb _db;
+    private string? errorMessage;
+
+
+    protected override async Task OnInitializedAsync()
+    {        
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        selectedId = bidTracker.getCurrentBidId();
+        offers = new List<Offer>();
+
+        if (string.IsNullOrEmpty(selectedId))
+        {
+            Nav.NavigateTo("/AvailableBids");
+            return;
+        }
+        await loadBid();
+        await loadPDF();
+        await checkIfOfferisMade(selectedId);
+        await loadOffer();
+
+    }
+
+    private async Task loadBid()
+    {
+        Query query = _db.Collection("Bids").WhereEqualTo("Id", selectedId).Limit(1);
+        QuerySnapshot snapshot = await query.GetSnapshotAsync();
+        if (snapshot.Documents.Count > 0)
+        {
+            currentBid = new Bid();
+            currentBid.Id = selectedId;
+            DocumentSnapshot biddoc = snapshot.Documents[0];
+            biddoc.TryGetValue("Description", out string Description);
+            biddoc.TryGetValue("fileName", out string fileName);
+            biddoc.TryGetValue("Category", out string Category);
+            biddoc.TryGetValue("Open", out bool open);
+            //biddoc.TryGetValue("PdfUrl", out string PdfUrl);
+
+            currentBid.fileName = fileName;
+            currentBid.open = open;
+            currentBid.Description = Description;
+            currentBid.Category = Category;
+        }
+
+    }
+    private async Task loadPDF()
+    {
+        var bucket = Config["Firebase:Bucket"];
+        var storage = new FirebaseStorage(bucket, new FirebaseStorageOptions
+        {
+            AuthTokenAsyncFactory = () => Task.FromResult(authService.CurrentUserToken)
+        });
+
+        try
+        {
+            currentBid.PdfUrl = await storage
+            .Child("Bids")
+            .Child(currentBid.Id)
+            .Child(currentBid.fileName)
+            .GetDownloadUrlAsync();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.Message);
+        }
+    }
+    private async Task StoreFile(InputFileChangeEventArgs e)
+    {
+        file = e.File;
+        if (file == null) return;
+
+        //isUploading = true;
+
+        // Open the stream (max 10MB for this example)
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+    }
+
+    private async Task checkIfOfferisMade(string bidId)
+    {
+        List<Offer> offersList = new List<Offer>();
+
+        CollectionReference offersRef = _db.Collection("Offers");
+
+        Query query = offersRef.WhereEqualTo("bidID", bidId);
+
+        QuerySnapshot snapshot = await query.GetSnapshotAsync();
+
+
+        foreach (DocumentSnapshot document in snapshot.Documents)
+        {
+            if (document.Exists)
+            {
+                offersList.Add(new Offer
+                {
+                    Id = document.GetValue<string>("Id"),
+                    bidID = document.GetValue<string>("bidID"),
+                    fileName = document.GetValue<string>("fileName"),
+                    supplierEmail = document.GetValue<string>("supplierEmail"),                    
+                    Organization = document.TryGetValue("Organization", out string org) ? org : string.Empty
+                });
+            }
+        }
+        offers = offersList;
+    }
+
+    private async Task loadOffer()
+    {
+        var bucket = Config["Firebase:Bucket"];
+        var storage = new FirebaseStorage(bucket, new FirebaseStorageOptions
+        {
+            AuthTokenAsyncFactory = () => Task.FromResult(authService.CurrentUserToken)
+        });
+        foreach (Offer offer in offers)
+        {
+            try
+            {
+                offer.pdfURL = await storage
+                .Child("Offers")
+                .Child(currentBid.Id)
+                .Child(offer.supplierEmail)
+                .Child(offer.fileName)
+                .GetDownloadUrlAsync();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+        }        
+    }
+}

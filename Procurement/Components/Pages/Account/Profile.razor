@@ -1,0 +1,125 @@
+﻿@page "/profile"
+@using FireBlazor
+@using Google.Cloud.Firestore
+@using Procurement.Components.Model
+@inject AuthService AuthService
+@inject NavigationManager Nav
+@inject IConfiguration Config
+
+<div class="design-wrapper">
+    <div class="design-card">
+        <h3 class="form-title mb-4">My Profile</h3>
+
+        @if (userModel == null)
+        {
+            <p>Loading profile...</p>
+        }
+        else
+        {
+            <EditForm Model="userModel" OnValidSubmit="UpdateProfile">
+                <DataAnnotationsValidator />
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="input-group-custom">
+                            <label>First Name</label>
+                            <InputText @bind-Value="userModel.FirstName" class="custom-input" />
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="input-group-custom">
+                            <label>Last Name</label>
+                            <InputText @bind-Value="userModel.LastName" class="custom-input" />
+                        </div>
+                    </div>
+                    <div class="col-md-12">
+                        <div class="input-group-custom">
+                            <label>Email Address</label>
+                            <InputText @bind-Value="userModel.Email" class="custom-input" />
+                        </div>
+                    </div>
+                    @if (userModel.Role == "Supplier")
+                    {
+                        <div class="input-group">
+                            <label>Category</label>
+                            <InputSelect @bind-Value="userModel.category" class="custom-input select-style">
+                                <option value="" disabled selected>Select Category</option>
+                                @if (categories != null)
+                                {
+                                    @foreach (string cat in categories)
+                                    {
+                                        <option value="@cat">@cat</option>
+                                    }
+                                }
+                            </InputSelect>
+                        </div>
+                    }                    
+                </div>
+
+                @if (!string.IsNullOrEmpty(successMessage))
+                {
+                    <div class="alert alert-success mt-3">@successMessage</div>
+                }
+
+                <div class="mt-4">
+                    <button type="submit" class="btn-action">UPDATE PROFILE</button>
+                </div>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private FirestoreDb _db;
+    private User userModel = new();
+    private UserController uc = new();
+    private List<string> categories = new List<string>();
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Fetch current user from AuthService
+        // Assuming AuthService has a way to get the current logged-in user object/ID
+        var currentUser = AuthService.CurrentUser;
+
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        await GetCategoriesAsync();
+
+        if (currentUser != null)
+        {
+            currentUser = await uc.GetUsersByEmail(currentUser.Email);
+            userModel = currentUser;
+        }
+    }
+
+    private async Task UpdateProfile()
+    {
+        try
+        {
+            await uc.UpdateUserAsync(userModel);
+            successMessage = "Profile updated successfully!";
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            successMessage = "Error: " + ex.Message;
+        }
+    }
+
+    public async Task GetCategoriesAsync()
+    {
+        try
+        {
+            var snapshot = await _db.Collection("Categories").GetSnapshotAsync();
+            foreach (DocumentSnapshot document in snapshot.Documents)
+            {
+                categories.Add(document.GetValue<string>("name"));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
+
+    }
+}

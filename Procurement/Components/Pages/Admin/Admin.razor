@@ -1,0 +1,22 @@
+﻿@page "/Admin"
+@inject AuthService authService
+@inject IJSRuntime js
+
+<h3>Welcome, @authService.CurrentUser?.Email</h3>
+<p>Your current role is: <b>@authService.CurrentUser?.Role</b></p>
+
+@if (authService.CurrentUser?.Role == "Admin")
+{
+    <button class="btn btn-danger">Admin Settings</button>
+}
+
+@code{
+        [CascadingParameter]
+        private Task<AuthenticationState> authenticationStateTask{ get; set; }
+
+    private async Task DisplayGreetingAlert()
+    {
+        var authenticationState = await authenticationStateTask;
+        var message = $"Hello {authenticationState.User.Identity.Name}";
+    }
+}

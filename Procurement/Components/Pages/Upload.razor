@@ -1,0 +1,56 @@
+﻿@page "/upload"
+@using Procurement.Components.Model
+@inject FileService FileService
+@inject AuthService authService
+
+<PageTitle>Upload PDF</PageTitle>
+
+<div class="upload-container">
+    <InputFile OnChange="HandleFileSelected" accept=".pdf" class="form-control" />
+
+    @if (isUploading)
+    {
+        <div class="progress mt-2">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+        </div>
+        <p>Uploading to Firebase...</p>
+    }
+
+    @if (!string.IsNullOrEmpty(uploadedUrl))
+    {
+        <div class="alert alert-success mt-3">
+            File uploaded! <a href="@uploadedUrl" target="_blank">View PDF</a>
+        </div>
+    }
+</div>
+
+@code {
+    private bool isUploading = false;
+    private string? uploadedUrl;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null) return;
+
+        isUploading = true;
+
+        // Open the stream (max 10MB for this example)
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+        
+        try
+        {
+            uploadedUrl = await FileService.UploadPdfAsync("test/"+"register",stream, file.Name,authService.CurrentUserToken);
+        }
+        catch (Exception ex)
+        {
+            // Log or handle error
+            Console.WriteLine(ex.Message);
+        }
+        finally
+        {
+            isUploading = false;
+        }
+        
+    }
+}

@@ -1,0 +1,183 @@
+﻿@page "/myAwardedOffers"
+@using Google.Cloud.Firestore
+@using Procurement.Components.Model
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@inject AuthService authService
+
+<div class="design-wrapper">
+    <div class="design-card wide-card">
+        <div class="header-banner mb-4">
+            <h3 class="form-title">Contract Outcomes</h3>
+            <p class="text-white-50">Review the status of your submitted proposals and finalized contracts.</p>
+        </div>
+
+        @if (isLoading)
+        {
+            <div class="loading-state text-center p-5">
+                <div class="spinner-border text-info" role="status"></div>
+                <p class="mt-2 text-muted">Retrieving your proposal history...</p>
+            </div>
+        }
+        else if (myOutcomes.Count == 0)
+        {
+            <div class="alert alert-light border shadow-sm text-center p-5">
+                <i class="bi bi-clipboard-x display-4 d-block mb-3 opacity-50"></i>
+                <h5>No finalized contracts found.</h5>
+                <p class="text-muted">Once a bid you've participated in is closed and awarded, the result will appear here.</p>
+                <button class="btn btn-primary mt-3" @onclick='() => Nav.NavigateTo("/AvailableBids")'>Browse Available Bids</button>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Project / Bid ID</th>
+                            <th>Your Quote</th>
+                            <th>Organization budget</th>
+                            <th>Status</th>
+                            <th>Outcome</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in myOutcomes)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="fw-bold">@item.BidDescription</div>
+                                    <small class="text-muted">Ref: @item.BidId</small>
+                                </td>
+                                <td>@item.MyQuoteAmount.ToString("C")</td>
+                                <td>@(item.OrganizationBudget > 0 ? item.OrganizationBudget.ToString("C") : "Pending")</td>
+                                
+                                    @if (item.accepted)
+                                    {
+                                    <td>
+                                        <span class="badge bg-success"><i class="bi bi-trophy-fill me-1"></i> Contract Awarded</span>
+                                    </td>
+                                    <td>
+                                        <div class="text-success fw-bold">Won</div>
+                                    </td>
+                                }
+                                else
+                                {
+                                    if (item.pending)
+                                    {
+                                        <td>
+                                            <span class="badge bg-secondary">Pending</span>
+                                        </td>
+                                        <td>
+                                            <div class="text-success fw-bold">N/A</div>
+                                        </td>
+                                    }
+                                    else
+                                    {
+                                        <td>
+                                            <span class="badge bg-secondary">Closed</span>
+                                        </td>
+                                        <td>
+                                            <div class="text-success fw-bold">Not selected</div>
+                                        </td>
+                                    }
+
+                                }
+                                    
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private bool isLoading = true;
+    private List<SupplierOutcome> myOutcomes = new();
+    private FirestoreDb _db;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        await LoadMyOutcomes();
+        isLoading = false;
+    }
+
+    private async Task LoadMyOutcomes()
+    {
+        try
+        {
+            string email = authService.CurrentUser?.Email;
+            if (string.IsNullOrEmpty(email)) return;
+
+            OfferController oc = new OfferController();
+            BidController bc = new BidController();
+
+            List<Offer> offers= await oc.GetOffers(email);
+            foreach (Offer offer in offers)
+            {
+                Bid bid = await bc.GetBidById(offer.bidID);
+                if (!bid.awarded)
+                {
+                    myOutcomes.Add(new SupplierOutcome
+                    {
+                        BidId = bid.Id,
+                        BidDescription = bid.Description,
+                        MyQuoteAmount = offer.TotalQuoteAmount,
+                        OrganizationBudget = bid.decidedPrice,
+                        pending= true,
+                        accepted = false
+                    });
+                }
+                else
+                {
+                    if (offer.Status == "Accepted")
+                    {
+
+                        myOutcomes.Add(new SupplierOutcome
+                        {
+                            BidId = bid.Id,
+                            BidDescription = bid.Description,
+                            MyQuoteAmount = offer.TotalQuoteAmount,
+                            OrganizationBudget = bid.decidedPrice,
+                            pending = false,
+                            accepted = true
+                        });
+                    }
+                    else
+                    {
+                        myOutcomes.Add(new SupplierOutcome
+                        {
+                            BidId = bid.Id,
+                            BidDescription = bid.Description,
+                            MyQuoteAmount = offer.TotalQuoteAmount,
+                            OrganizationBudget = bid.decidedPrice,
+                            pending = false,
+                            accepted = false
+                        });
+                    }
+                    
+                }
+                
+            }
+            
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+    }
+
+
+    public class SupplierOutcome
+    {
+        public string BidId { get; set; }
+        public string BidDescription { get; set; }
+        public double MyQuoteAmount { get; set; }
+        public double OrganizationBudget { get; set; }
+        public bool accepted { get; set; }
+        public bool pending{ get; set; }
+    }
+}

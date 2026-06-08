@@ -1,0 +1,89 @@
+﻿@page "/validatePdf"
+@using Procurement.Components.Model
+@inject PDFValidatorService ValidatorService
+@inject IConfiguration Config
+
+<PageTitle>Document Validation</PageTitle>
+
+<div class="container mt-4">
+    <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h3 class="mb-0">Procurement Document Validator</h3>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">Select a PDF document (e.g., Quote, Invoice, RFP) to verify its viability.</p>
+
+            <div class="mb-3">
+                <label class="form-label">Document Type</label>
+                <select class="form-select" @bind="contextType">
+                    <option value="Quote">Offer</option>
+                    <option value="Invoice">Invoice</option>
+                    <option value="RFP">Bid</option>
+                    <option value="Contract">Contract</option>
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Upload PDF</label>
+                <InputFile OnChange="HandleFileSelected" class="form-control" accept=".pdf" />
+            </div>
+
+            @if (isProcessing)
+            {
+                <div class="d-flex align-items-center text-primary mt-3">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    <span>Gemini is analyzing your document...</span>
+                </div>
+            }
+
+            @if (validationResult != null)
+            {
+                <div class="mt-4 alert @(validationResult.Value.IsViable ? "alert-success" : "alert-danger")">
+                    <h5 class="alert-heading">
+                        @(validationResult.Value.IsViable ? "✅ Document Validated" : "❌ Validation Failed")
+                    </h5>
+                    <p class="mb-0">@validationResult.Value.Reason</p>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string contextType = "Quote";
+    private bool isProcessing = false;
+    private (bool IsViable, string Reason)? validationResult;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null) return;
+
+        // Reset UI state
+        isProcessing = true;
+        validationResult = null;
+
+        try
+        {
+            // Limit file size (e.g., 5MB) to prevent memory issues
+            long maxFileSize = 1024 * 1024 * 5;
+
+            using var stream = file.OpenReadStream(maxFileSize);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            byte[] pdfBytes = ms.ToArray();
+
+            // Call your service
+            validationResult = await ValidatorService.CheckPdfViabilityAsync(pdfBytes, contextType,Config);
+        }
+        catch (Exception ex)
+        {
+            validationResult = (false, $"Error reading file: {ex.Message}");
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+}

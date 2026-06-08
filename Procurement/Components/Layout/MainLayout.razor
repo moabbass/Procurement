@@ -1,0 +1,117 @@
+﻿@inherits LayoutComponentBase
+@inject AuthenticationStateProvider AuthProvider
+@inject AuthService MyAuthService
+@inject FirebaseAuthStateProvider CustomAuthStateProvider
+@inject NavigationManager Nav
+@inject IJSRuntime js
+
+
+<div class="page">   
+    
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+    
+    <main>
+        <div class="top-row " >
+            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+            <AuthorizeView>
+                <NotAuthorized>
+                    <a href="/login">Login</a>
+                    <a href="/register">Register</a>
+                </NotAuthorized>
+                <Authorized>
+                    @if (MyAuthService.CurrentUser != null)
+                    {
+                        <a href="/profile" class="d-flex align-items-center text-decoration-none">
+                            <div class="avatar-circle me-2">
+                                @* Use a null check and a fallback for the substring *@
+                                @(string.IsNullOrEmpty(MyAuthService.CurrentUser.FirstName)
+                                                            ? "Profile"
+                                                            : MyAuthService.CurrentUser.FirstName.Substring(0, 1).ToUpper())
+                        </div>
+                        <span class="user-name">@MyAuthService.CurrentUser.FirstName</span>
+                    </a>
+                                        }
+                    <button class="btn btn-link nav-link" @onclick="HandleLogout">Logout</button>
+                </Authorized>
+            </AuthorizeView>
+        </div>        
+
+        <div class="content">
+            @Body
+        </div>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Subscribe to changes so the whole layout (including NavMenu) refreshes
+        AuthProvider.AuthenticationStateChanged += _ => InvokeAsync(StateHasChanged);
+    }    
+
+
+    private async Task HandleLogout()
+    {
+        try
+        {
+            await MyAuthService.logOut();
+            CustomAuthStateProvider.NotifyUserLogout();
+            Nav.NavigateTo($"/register");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
+
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            bool wasRefreshed = await IsPageRefreshed();
+
+            if (wasRefreshed)
+            {                
+                await MyAuthService.InitializeAsync();
+                try
+                {
+                    if (MyAuthService.CurrentUser != null)
+                    {
+                        CustomAuthStateProvider.NotifyUserAuthentication(MyAuthService.CurrentUser);
+
+                        int retries = 0;
+                        while (MyAuthService.CurrentUser == null && retries < 5)
+                        {
+                            await Task.Delay(100);
+                            retries++;
+                        }
+
+                    }
+
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+                StateHasChanged();
+            }
+        }
+        //await MyAuthService.InitializeAsync();
+        
+    }
+
+    private async Task<bool> IsPageRefreshed()
+    {
+        return await js.InvokeAsync<bool>("checkBrowserRefresh");
+    }
+    
+}

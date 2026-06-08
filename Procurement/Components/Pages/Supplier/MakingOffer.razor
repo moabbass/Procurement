@@ -1,0 +1,430 @@
+﻿@page "/makingOffer"
+@using Google.Cloud.Firestore
+@using Procurement.Components.Model
+@using Firebase.Storage
+@inject BidTracker bidTracker
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@inject FileService FileService
+@inject AuthService authService
+@inject PDFValidatorService ValidatorService
+
+
+<div class="design-wrapper">
+    <div class="design-card wide-card">
+        <div class="close-icon" @onclick='() => Nav.NavigateTo("/AvailableBids")'>&times;</div>
+
+        <div class="header-banner">
+            <h3 class="form-title">Submit Formal Proposal</h3>            
+        </div>
+
+        @if (currentBid == null)
+        {
+            <div class="loading-state text-center p-5">
+                <div class="spinner-border text-info" role="status"></div>
+                <p class="mt-2">Retrieving bid specifications...</p>
+            </div>
+        }
+        else
+        {
+            <div class="bid-container mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <span class="badge bg-secondary p-2">Reference: @currentBid.Id</span>
+                        <span class="badge bg-info p-2 ms-2">@currentBid.Category</span>
+                    </div>
+                    <div class="text-end">
+                        <span class="status-indicator @(currentBid.open ? "text-success" : "text-danger") fw-bold">
+                            <i class="bi bi-circle-fill small"></i> @(currentBid.open ? "Accepting Offers" : "Closed")
+                        </span>
+                    </div>
+                </div>
+
+                <div class="row g-4">
+                    <div class="col-lg-8">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-body">
+                                <h4 class="card-title text-primary mb-3">Project Description</h4>
+                                <p class="card-text lead" style="white-space: pre-wrap;">@currentBid.Description</p>
+
+                                <hr />
+
+                                <h5 class="fw-bold"><i class="bi bi-gear-wide-connected"></i> Technical Requirements</h5>
+                                <p class="text-muted">@(string.IsNullOrEmpty(currentBid.TechnicalRequirements) ? "Standard procurement guidelines apply." : currentBid.TechnicalRequirements)</p>
+
+                                @if (!string.IsNullOrEmpty(currentBid.PdfUrl))
+                                {
+                                    <div class="mt-4 p-3 bg-light rounded d-flex align-items-center justify-content-between">
+                                        <span><i class="bi bi-file-earmark-pdf text-danger"></i> Official RFP Document</span>
+                                        <a href="@currentBid.PdfUrl" target="_blank" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-download"></i> Download PDF
+                                        </a>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4">
+                        <div class="card border-0 bg-primary text-white shadow-sm mb-3">
+                            <div class="card-body">
+                                <small class="opacity-75">Submission Deadline</small>
+                                <h4 class="mb-0">@currentBid.dueDate.ToString("MMM dd, yyyy")</h4>
+                                <small class="d-block mt-1">@( (currentBid.dueDate - DateTime.Now).Days ) days remaining</small>
+                            </div>
+                        </div>
+
+                        <div class="card border-0 shadow-sm">
+                            <ul class="list-group list-group-flush">
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-box-seam me-2 text-muted"></i>
+                                        <small class="text-muted d-block">Quantity Required</small>
+                                        <strong>@currentBid.Quantity units</strong>
+                                    </div>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-geo-alt me-2 text-muted"></i>
+                                        <small class="text-muted d-block">Delivery Location</small>
+                                        <strong>@(currentBid.DeliveryLocation ?? "TBD")</strong>
+                                    </div>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-cash-stack me-2 text-muted"></i>
+                                        <small class="text-muted d-block">Budget Estimate</small>
+                                        <strong>@currentBid.EstimatedBudget.ToString("C")</strong>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="my-5" />
+
+        }
+
+            <EditForm Model="@newOffer" OnValidSubmit="makeOffer" class="offer-form">
+                <DataAnnotationsValidator />
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Total Quote Amount (@newOffer.Currency)</label>
+                        <InputNumber @bind-Value="newOffer.TotalQuoteAmount" class="form-control" placeholder="0.00" />
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Lead Time (Days to Deliver)</label>
+                        <InputNumber @bind-Value="newOffer.LeadTimeDays" class="form-control" />
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Offer Valid Until</label>
+                        <InputDate @bind-Value="newOffer.OfferExpiryDate" class="form-control" />
+                    </div>
+
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Payment Terms</label>
+                        <InputSelect @bind-Value="newOffer.PaymentTerms" class="form-control">
+                            <option value="">Select Terms...</option>
+                            <option value="Net 30">Net 30</option>
+                            <option value="Net 60">Net 60</option>
+                            <option value="Due on Receipt">Due on Receipt</option>
+                        </InputSelect>
+                    </div>
+
+                    <div class="col-12 mb-3">
+                        <label class="form-label fw-bold">Technical Remarks / Notes</label>
+                        <InputTextArea @bind-Value="newOffer.TechnicalSpecifications" class="form-control" rows="3" placeholder="Briefly describe how your offer meets requirements..." />
+                    </div>
+
+                    <div class="col-12 mb-4">                        
+                        <div class="input-group-custom mb-4">
+                            <label>Supporting Document (PDF)</label>
+                            <InputFile OnChange="StoreFile" accept=".pdf" class="custom-input" />
+
+                            @if (isUploading)
+                            {
+                                <div class="custom-progress mt-2">
+                                    <div class="custom-progress-bar"></div>
+                                </div>
+                            }
+                            @if (isProcessing)
+                            {
+                                <div class="d-flex align-items-center text-primary mt-3">
+                                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                                    <span>Gemini is analyzing your document...</span>
+                                </div>
+                            }
+
+                            @if (validationResult != null)
+                            {
+                                <div class="mt-4 alert @(validationResult.Value.IsViable ? "alert-success" : "alert-danger")">
+                                    <h5 class="alert-heading">
+                                        @(validationResult.Value.IsViable ? "✅ Document Validated" : "❌ Validation Failed")
+                                    </h5>
+                                    <p class="mb-0">@validationResult.Value.Reason</p>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+
+                </div>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">@errorMessage</div>
+                }
+
+                <div class="form-actions d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-lg flex-grow-1" disabled="@isUploading">
+                        <i class="bi bi-send"></i> SUBMIT FORMAL OFFER
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-lg" @onclick='() => Nav.NavigateTo("/AvailableBids")'>CANCEL</button>
+                </div>
+            </EditForm>
+        }
+    </div>
+</div>
+@code {
+    private Bid currentBid=null;
+    private Offer newOffer = new Offer();
+    private IBrowserFile file = null;
+    private bool isUploading = false;
+    private bool published = false;
+    private string selectedId="";
+    private FirestoreDb _db ;
+    private string? errorMessage;
+
+    private string contextType = "Bid";
+    private bool isProcessing = false;
+    private (bool IsViable, string Reason)? validationResult;
+
+
+    protected override async Task OnInitializedAsync()
+    {
+
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        selectedId = bidTracker.getCurrentBidId();
+        newOffer.OfferExpiryDate = DateTime.Today;
+
+        if (string.IsNullOrEmpty(selectedId))
+        {            
+            Nav.NavigateTo("/AvailableBids");
+            return;
+        }        
+        await loadBid();
+        await loadPDF();
+
+    }
+
+    private async Task loadBid()
+    {
+        Query query = _db.Collection("Bids").WhereEqualTo("Id", selectedId).Limit(1);
+        QuerySnapshot snapshot = await query.GetSnapshotAsync();
+
+        if (snapshot.Documents.Count > 0)
+        {
+            DocumentSnapshot biddoc = snapshot.Documents[0];
+            currentBid = new Bid { Id = selectedId };
+
+
+            biddoc.TryGetValue("Description", out string desc);
+            currentBid.Description = desc;
+            biddoc.TryGetValue("Category", out string cat);
+            currentBid.Category = cat;
+            biddoc.TryGetValue("Open", out bool isOpen);
+            currentBid.open = isOpen;
+            biddoc.TryGetValue("fileName", out string fName);
+            currentBid.fileName = fName;
+
+            biddoc.TryGetValue("Quantity", out int qty);
+            currentBid.Quantity = qty == 0 ? 1 : qty; 
+
+            biddoc.TryGetValue("EstimatedBudget", out double budget);
+            currentBid.EstimatedBudget = budget;
+
+            biddoc.TryGetValue("TechnicalRequirements", out string techReq);
+            currentBid.TechnicalRequirements = techReq;
+
+            biddoc.TryGetValue("DeliveryLocation", out string location);
+            currentBid.DeliveryLocation = location;
+
+            // Date handling
+            biddoc.TryGetValue("dueDate", out DateTime dDate);
+            currentBid.dueDate = dDate;
+        }
+    }
+    private async Task loadPDF()
+    {
+        var bucket = Config["Firebase:Bucket"];
+        var storage = new FirebaseStorage(bucket, new FirebaseStorageOptions
+        {
+            AuthTokenAsyncFactory = () => Task.FromResult(authService.CurrentUserToken)
+        });
+
+        try
+        {
+            currentBid.PdfUrl = await storage
+            .Child("Bids")
+            .Child(currentBid.Id)
+            .Child(currentBid.fileName)
+            .GetDownloadUrlAsync();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.Message);
+        }
+    }
+    private async Task StoreFile(InputFileChangeEventArgs e)
+    {
+        file = e.File;
+        if(file == null)
+        {
+            errorMessage = "A PDF proposal document is mandatory for compliance.";
+            return;
+        }
+
+        if (file.ContentType != "application/pdf")
+        {
+            errorMessage = "Invalid file type. Please upload a PDF.";
+            file = null;
+            return;
+        }
+        await validatePDF();
+        //isUploading = true;
+
+        // Open the stream 
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+    }
+    private async Task uploadPDF()
+    {
+        if (file == null) return;
+        if (validationResult.Value.IsViable)
+        {
+            isUploading = true;
+
+            StateHasChanged();
+            // Open the stream 
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+
+            try
+            {
+                //uploadedUrl = await FileService.UploadPdfAsync($"{regModel.Email}/" + "register", stream, file.Name);
+                newOffer.fileName = file.Name;
+                newOffer.supplierEmail = authService.CurrentUser.Email;
+                newOffer.bidID = currentBid.Id;
+                newOffer.Organization = authService.CurrentUser.Organization;
+                isUploading = false;
+                published = true;
+                await FileService.UploadPdfAsync("Offers/" + $"{currentBid.Id}/" + $"{newOffer.supplierEmail}", stream, file.Name, authService.CurrentUserToken);
+
+                //user.fileName = file.Name;
+            }
+            catch (Exception ex)
+            {
+
+                errorMessage = ex.Message;
+            }
+            finally
+            {
+                StateHasChanged();
+            }
+        }
+        else
+        {
+            errorMessage = "You need to upload a viable supporting document to make an offer";
+        }
+        
+    }
+
+    private async Task validatePDF()
+    {
+        if (file == null) return;
+
+        // Reset UI state
+        isProcessing = true;
+        validationResult = null;
+
+        try
+        {
+            // Limit file size (e.g., 5MB) to prevent memory issues
+            long maxFileSize = 1024 * 1024 * 5;
+
+            using var stream = file.OpenReadStream(maxFileSize);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            byte[] pdfBytes = ms.ToArray();
+
+            
+            validationResult = await ValidatorService.CheckPdfViabilityAsync(pdfBytes, contextType, Config);
+        }
+        catch (Exception ex)
+        {
+            validationResult = (false, $"Error reading file: {ex.Message}");
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task makeOffer()
+    {
+        if (file != null)
+        {            
+            if (newOffer.LeadTimeDays == 0 || string.IsNullOrEmpty(newOffer.PaymentTerms)  || newOffer.TotalQuoteAmount == 0)
+            {
+                errorMessage = "You need to fill all the fields to make an offer";
+                return;
+            }
+            int offerCount = await _db.Collection("Bids").ListDocumentsAsync().CountAsync();
+
+            CollectionReference collection = _db.Collection("Offers");
+
+            newOffer.Id = $"{offerCount + 1}";
+            try
+            {
+                await uploadPDF();
+                var offer = new
+                {
+                    Id = newOffer.Id,
+                    supplierEmail = newOffer.supplierEmail,
+                    bidID = newOffer.bidID,                    
+                    fileName = newOffer.fileName,
+                    Organization = authService.CurrentUser.Organization,
+                    TotalQuoteAmount = newOffer.TotalQuoteAmount,
+                    LeadTimeDays = newOffer.LeadTimeDays,
+                    OfferExpiryDate = DateTime.SpecifyKind(newOffer.OfferExpiryDate, DateTimeKind.Utc),
+                    TechnicalSpecifications = newOffer.TechnicalSpecifications,
+                    PaymentTerms = newOffer.PaymentTerms
+                };
+                await collection.AddAsync(offer);
+                Nav.NavigateTo("/AvailableBids");
+
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+            }
+            
+        }
+        else
+        {
+            errorMessage = "You need to upload supporting document to publish a bid";
+        }
+        
+    }
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        file = e.File;
+        errorMessage = null;
+    }
+
+}

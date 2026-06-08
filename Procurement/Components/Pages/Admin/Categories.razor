@@ -1,0 +1,140 @@
+﻿@page "/categories"
+@using Google.Cloud.Firestore
+@inject IConfiguration Config
+@inject AuthService authService
+
+<div class="design-wrapper">
+    <div class="design-card table-card">
+        <div class="close-icon">&times;</div>
+        <h3 class="form-title">Category Management</h3>
+
+        <div class="input-group-custom">
+            <label>New Category Name</label>
+            <div class="flex-input">
+                <input type="text" class="custom-input" @bind="newCategoryName" placeholder="Enter name..." />
+                <button class="btn-action add-btn" @onclick="CreateCategory">ADD CATEGORY</button>
+            </div>
+        </div>
+
+        <hr class="styled-hr" />
+
+        @if (categories == null)
+        {
+            <div class="loading-state">
+                <div class="spinner-border text-info" role="status"></div>
+                <p>Loading categories...</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table custom-table">
+                    <thead>
+                        <tr>
+                            <th>Category Name</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (string cat in categories)
+                        {
+                            <tr>
+                                <td class="cat-name">@cat</td>
+                                <td class="text-right">
+                                    <button class="btn-delete" @onclick="() => DeleteCategory(cat)">
+                                        DELETE
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private FirestoreDb _db ;
+    private const string CollectionName = "Categories";
+
+    private List<string> categories;
+    private string newCategoryName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        int retries = 0;
+        while (authService.CurrentUser == null && retries < 8)
+        {
+            await Task.Delay(100);
+            retries++;
+        }
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        await RefreshList();
+    }
+
+    private async Task RefreshList()
+    {
+        categories = new List<string>();
+        await GetCategoriesAsync();
+    }
+
+    private async Task CreateCategory()
+    {
+        if (!string.IsNullOrWhiteSpace(newCategoryName))
+        {
+            await AddCategoryAsync(newCategoryName);
+            newCategoryName = ""; // Clear input
+            await RefreshList();
+        }
+    }
+
+    private async Task DeleteCategory(string id)
+    {
+        await DeleteCategoryAsync(id);
+        await RefreshList();
+    }
+
+
+    // READ: Get all categories
+    public async Task GetCategoriesAsync()
+    {
+        try
+        {
+            var snapshot = await _db.Collection(CollectionName).GetSnapshotAsync();
+            foreach (DocumentSnapshot document in snapshot.Documents)
+            {
+                categories.Add(document.GetValue<string>("name"));
+            }
+        }
+        catch(Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
+
+    }
+
+    // CREATE: Add a new category
+    public async Task AddCategoryAsync(string name)
+    {
+        var collection = _db.Collection(CollectionName);
+        await collection.AddAsync(new { name = name });
+    }
+
+    // DELETE: Remove by Document 
+    public async Task DeleteCategoryAsync(string name)
+    {
+        Query query = _db.Collection(CollectionName).WhereEqualTo("name", name);
+        
+        QuerySnapshot snapshot = await query.GetSnapshotAsync();
+
+        foreach (DocumentSnapshot document in snapshot.Documents)
+        {
+            if (document.Exists)
+            {
+                await document.Reference.DeleteAsync();
+            }
+        }
+    }
+
+}

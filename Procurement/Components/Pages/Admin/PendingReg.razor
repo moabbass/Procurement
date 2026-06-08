@@ -1,0 +1,194 @@
+﻿@page "/pendingReg"
+@using Firebase.Storage
+@using Procurement.Components.Model
+@using Google.Cloud.Firestore;
+@inject IJSRuntime js
+@inject IConfiguration Config
+@inject AuthService authService
+
+<div class="design-wrapper">
+    <div class="design-card table-card">
+        <div class="close-icon">&times;</div>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3 class="form-title m-0">Library Collection</h3>
+            <span class="badge-count">
+                @users?.Count Registered Users
+            </span>
+        </div>
+
+        @if (users == null)
+        {
+            <div class="loading-state">
+                <div class="spinner-border text-info" role="status"></div>
+                <p>Loading users from Firestore...</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table custom-table">
+                    <thead>
+                        <tr>
+                            <th>User Details</th>
+                            <th>Organization</th>
+                            <th class="text-center">Document</th>
+                            <th class="text-end">Approval Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var user in users)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="user-avatar-mini me-2">
+                                            <i class="bi bi-person"></i>
+                                        </div>
+                                        <span class="fw-bold">@user.Email</span>
+                                    </div>
+                                </td>
+                                <td><span class="text-muted">@user.Organization</span></td>
+                                <td class="text-center">
+                                    @if (!string.IsNullOrEmpty(user.pdfUrl))
+                                    {
+                                        <a href="@user.pdfUrl" target="_blank" class="btn-table-action">
+                                            <i class="bi bi-file-earmark-pdf"></i> View
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small italic">None</span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    <div class="d-flex justify-content-end align-items-center">
+                                        <div class="form-check form-switch me-3">
+                                            <input class="form-check-input custom-switch" type="checkbox" role="switch"
+                                                   checked="@user.Approved"
+                                                   @onchange="(e) => UpdateStatus(user, e)" />
+                                        </div>
+                                        @if (user.Approved)
+                                        {
+                                            <span class="status-open">Approved</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="status-closed">Pending</span>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    /* Styling to make the switch feel more tactile */
+    .form-check-input:checked {
+        background-color: #198754;
+        border-color: #198754;
+    }
+
+    .card {
+        transition: all 0.2s ease-in-out;
+    }
+
+        .card:hover {
+            background-color: #f8f9fa;
+            transform: scale(1.01);
+        }
+</style>
+
+@code {
+
+    public List<User> users { get; set; }
+    private FirestoreDb _db ;    
+
+    protected override async Task OnInitializedAsync()
+    {
+        int retries = 0;
+        while (authService.CurrentUser == null && retries < 5)
+        {
+            await Task.Delay(100);
+            retries++;
+        }
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        await LoadDocuments();
+        await loadPDFs();
+    }
+
+    public async Task LoadDocuments()
+    {
+        var snapshot = await _db.Collection("users").WhereEqualTo("Role", "Supplier").GetSnapshotAsync();
+        users = snapshot.Documents.Select(d => new User
+        {
+            Email = d.GetValue<string>("Email"),
+            //Organization = d.GetValue<string>("Organization"),
+            Role = d.GetValue<string>("Role"),
+            Approved = d.GetValue<bool>("Approved"),
+            fileName = d.GetValue<string>("fileName")
+        }).ToList();
+    }
+
+
+    private async Task loadPDFs()
+    {
+        var bucket = Config["Firebase:Bucket"];
+
+
+        var storage = new FirebaseStorage(bucket, new FirebaseStorageOptions
+        {
+            AuthTokenAsyncFactory = () => Task.FromResult(authService.CurrentUserToken)
+        });
+
+        foreach(User user in users)
+        {            
+            try
+            {
+                user.pdfUrl = await storage
+                .Child(user.Email.Trim())
+                .Child("register")
+                .Child(user.fileName)
+                .GetDownloadUrlAsync();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+
+        }
+        
+    }
+
+    private async Task UpdateStatus(User user, ChangeEventArgs e)
+    {
+        bool isApproved = (bool)(e.Value ?? false);
+        user.Approved = isApproved;
+
+        Query query = _db.Collection("users").WhereEqualTo("Email", user.Email);
+        QuerySnapshot snapshot = await query.GetSnapshotAsync();
+
+        if (snapshot.Documents.Count > 0)
+        {
+            // 2. Get the specific Document ID
+            string documentUid = snapshot.Documents[0].Id;
+
+            // Create a reference to that specific document
+            DocumentReference docRef = _db.Collection("users").Document(documentUid);
+
+            try
+            {
+                
+                await docRef.UpdateAsync("Approved", isApproved);
+            }catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+        }
+       
+    }
+}

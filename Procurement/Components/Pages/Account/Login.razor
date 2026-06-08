@@ -1,0 +1,116 @@
+﻿@page "/login"
+@inject NavigationManager Nav
+@using System.ComponentModel.DataAnnotations;
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.AspNetCore.Components.Authorization
+@using Procurement.Components.Model
+@using System.Security.Claims
+@inject AuthService MyAuthService
+@inject FirebaseAuthStateProvider CustomAuthStateProvider
+
+<div class="registration-wrapper">
+    <div class="registration-card">
+        <div class="close-icon">&times;</div>
+        <h3 class="form-title">Sign In</h3>
+
+        <EditForm Model="@user" OnValidSubmit="HandleLogin">
+            <DataAnnotationsValidator />
+
+            <div class="input-group">
+                <label>Email address</label>
+                <InputText @bind-Value="user.Email" class="custom-input" />
+            </div>
+
+            <div class="input-group">
+                <label>Password</label>
+                <InputText @bind-Value="user.Password" type="password" class="custom-input" />
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="error-msg">
+                    @errorMessage
+                </div>
+            }
+
+            <button type="submit" class="btn-create" disabled="@isProcessing">
+                @(isProcessing ? "AUTHENTICATING..." : "LOGIN")
+            </button>
+
+            <div class="login-link">
+                Don't have an account? <a href="/register">Sign up</a>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private User user = new();
+    private bool isProcessing = false;
+    private string? errorMessage;
+    [CascadingParameter]
+    public HttpContext? httpContext{ get; set; }
+
+
+    private async Task HandleLogin()
+    {
+        isProcessing = true;
+        var result = await MyAuthService.SignInAsync(user.Email, user.Password);
+
+        if (result.Success && result.Token != null)
+        {
+            string role = MyAuthService.GetRoleFromToken(result.Token);
+            if (result.approved)
+            {
+                user.Role = role;
+                MyAuthService.CurrentUserToken = result.Token;
+                MyAuthService.CurrentUser = user;
+                await MyAuthService.InitializeAsync();
+                //AuthStateProvider.NotifyUserAuthentication(user);
+                //((FirebaseAuthStateProvider)AuthStateProvider).NotifyUserAuthentication(user);
+                try
+                {
+                    CustomAuthStateProvider.NotifyUserAuthentication(user);
+
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+                switch (role)
+                {
+                    case "Admin":
+                        Nav.NavigateTo($"/pendingReg");
+                        break;
+                    case "Organizor":
+                        Nav.NavigateTo("/BidCreation");
+                        break;
+                    case "Supplier":
+                        Nav.NavigateTo("/AvailableBids");
+                        break;
+                }
+            }
+            else
+            {
+                errorMessage = "Your account has not been approved by the organization yet";
+            }
+
+        }else
+        {
+            errorMessage = result.Error;
+        }
+        
+        isProcessing = false;
+        
+    }
+    
+    private string MapError(string? error) => error switch
+    {
+        "INVALID_LOGIN_CREDENTIALS" => "Incorrect email or password.",
+        "USER_DISABLED" => "This account has been suspended.",
+        "TOO_MANY_ATTEMPTS_TRY_LATER" => "Too many failed attempts. Try again later.",
+        _ => "Login failed. Please check your credentials."
+    };
+
+}

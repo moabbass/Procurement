@@ -1,0 +1,360 @@
+﻿@page "/reviewOffers"
+@using Google.Cloud.Firestore
+@using Procurement.Components.Model
+@using Firebase.Storage
+@inject BidTracker bidTracker
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@inject AuthService authService
+@inject IJSRuntime JS
+
+<div class="design-wrapper">
+    <div class="design-card wide-card">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <button class="btn btn-outline-secondary btn-sm mb-2" @onclick='() => Nav.NavigateTo("/bidsOrganizor")'>
+                    <i class="bi bi-arrow-left"></i> Back to Manager
+                </button>
+                <h3 class="form-title"> Bid: @selectedBidId</h3>
+            </div>
+        </div>
+
+        @if (currentBid == null)
+        {
+            <div class="loading-state text-center p-5">
+                <div class="spinner-border text-info" role="status"></div>
+                <p class="mt-2">Retrieving bid specifications...</p>
+            </div>
+        }
+        else
+        {
+            <div class="bid-container mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <span class="badge bg-secondary p-2">Reference: @currentBid.Id</span>
+                        <span class="badge bg-info p-2 ms-2">@currentBid.Category</span>
+                    </div>
+                    <div class="text-end">
+                        <span class="status-indicator @(currentBid.open ? "text-success" : "text-danger") fw-bold">
+                            <i class="bi bi-circle-fill small"></i> @(currentBid.open ? "Accepting Offers" : "Closed")
+                        </span>
+                    </div>
+                </div>
+
+                <div class="row g-4">
+                    <div class="col-lg-8">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-body">
+                                <h4 class="card-title text-primary mb-3">Project Description</h4>
+                                <p class="card-text lead" style="white-space: pre-wrap;">@currentBid.Description</p>
+                                <hr />
+                                <h5 class="fw-bold"><i class="bi bi-gear-wide-connected"></i> Technical Requirements</h5>
+                                <p class="text-muted">@(string.IsNullOrEmpty(currentBid.TechnicalRequirements) ? "Standard procurement guidelines apply." : currentBid.TechnicalRequirements)</p>
+                            </div>
+                            @if (!string.IsNullOrEmpty(currentBid.PdfUrl))
+                            {
+                                <div class="mt-4 p-3 bg-light rounded d-flex align-items-center justify-content-between">
+                                    <span><i class="bi bi-file-earmark-pdf text-danger"></i> Official RFP Document</span>
+                                    <a href="@currentBid.PdfUrl" target="_blank" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-download"></i> Download PDF
+                                    </a>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4">
+                        <div class="card border-0 bg-primary text-white shadow-sm mb-3">
+                            <div class="card-body">
+                                <small class="opacity-75">Submission Deadline</small>
+                                <h4 class="mb-0">@currentBid.dueDate.ToString("MMM dd, yyyy")</h4>
+                            </div>
+                        </div>
+                        <div class="card border-0 shadow-sm">
+                            <ul class="list-group list-group-flush">
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-box-seam me-2 text-muted"></i>
+                                        <small class="text-muted d-block">Quantity Required</small>
+                                        <strong>@currentBid.Quantity units</strong>
+                                    </div>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-cash-stack me-2 text-muted"></i>
+                                        <small class="text-muted d-block">Budget Estimate</small>
+                                        <strong>@currentBid.EstimatedBudget.ToString("C")</strong>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="my-5" />
+
+            @if (isLoading)
+            {
+                <div class="text-center p-5">
+                    <div class="spinner-border text-info"></div>
+                    <p>Loading Submissions...</p>
+                </div>
+            }
+            else if (offers.Count == 0)
+            {
+                <div class="alert alert-info border-0 shadow-sm">No offers were submitted for this bid.</div>
+            }
+            else
+            {
+                <h3 class="form-title">Supplier Proposals</h3>
+                <div class="row">
+                    <div class="col-md-4 border-end">
+                        <div class="list-group list-group-flush offer-list">
+                            @foreach (var offer in offers.OrderBy(o => o.TotalQuoteAmount))
+                            {
+                                <button class="list-group-item list-group-item-action border-0 mb-2 rounded shadow-sm @(selectedOffer?.Id == offer.Id ? "active bg-primary" : "bg-light")"
+                                        @onclick="() => SelectOffer(offer)">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <strong class="d-block">@offer.Organization</strong>
+                                        <span class="badge @(selectedOffer?.Id == offer.Id ? "bg-white text-primary" : "bg-primary")">
+                                            @offer.TotalQuoteAmount.ToString("C")
+                                        </span>
+                                    </div>
+                                    <small class="d-block mt-1 @(selectedOffer?.Id == offer.Id ? "text-white-50" : "text-muted")">
+                                        <i class="bi bi-envelope me-1"></i> @offer.supplierEmail
+                                    </small>
+                                    <small class="d-block @(selectedOffer?.Id == offer.Id ? "text-white-50" : "text-muted")">
+                                        Delivery: @offer.LeadTimeDays Days
+                                    </small>
+                                </button>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="col-md-8">
+                        @if (selectedOffer != null)
+                        {
+                            <div class="offer-details">
+                                <div class="d-flex justify-content-between align-items-center mb-4">
+                                    <h4 class="fw-bold mb-0">@selectedOffer.Organization</h4>
+                                    @if (!currentBid.open)
+                                    {
+                                        <button class="btn btn-success fw-bold shadow-sm" @onclick="AwardBid">
+                                            <i class="bi bi-trophy-fill me-2"></i> AWARD CONTRACT
+                                        </button>
+                                    }
+                                </div>
+
+                                <div class="row g-3 mb-4">
+                                    <div class="col-sm-4">
+                                        <div class="p-3 bg-light rounded text-center border h-100">
+                                            <small class="text-muted d-block">Price Quote</small>
+                                            <h4 class="fw-bold mb-0">@selectedOffer.TotalQuoteAmount.ToString("C")</h4>
+                                        </div>
+                                    </div>
+                                    <div class="col-sm-4">
+                                        <div class="p-3 bg-light rounded text-center border h-100">
+                                            <small class="text-muted d-block">Delivery Time</small>
+                                            <h4 class="fw-bold mb-0">@selectedOffer.LeadTimeDays Days</h4>
+                                        </div>
+                                    </div>
+                                    <div class="col-sm-4">
+                                        <div class="p-3 bg-light rounded text-center border h-100">
+                                            <small class="text-muted d-block">Terms</small>
+                                            <h5 class="fw-bold mb-0 pt-1">@selectedOffer.PaymentTerms</h5>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card border-0 shadow-sm mb-4">
+                                    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                                        <h6 class="mb-0 fw-bold"><i class="bi bi-file-earmark-text"></i> Supplier Remarks</h6>
+                                        <a href="@selectedOffer.pdfURL" target="_blank" class="btn btn-sm btn-outline-info">
+                                            <i class="bi bi-box-arrow-up-right"></i> Pop-out PDF
+                                        </a>
+                                    </div>
+                                    <div class="card-body bg-light-subtle">
+                                        <p class="mb-0" style="white-space: pre-wrap;">@(string.IsNullOrEmpty(selectedOffer.TechnicalSpecifications) ? "No additional notes provided." : selectedOffer.TechnicalSpecifications)</p>
+                                    </div>
+                                    <div class="card-footer p-0" style="height: 500px;">
+                                        @if (!string.IsNullOrEmpty(selectedOffer.pdfURL))
+                                        {
+                                            <iframe src="@selectedOffer.pdfURL" width="100%" height="100%" frameborder="0"></iframe>
+                                        }
+                                        else
+                                        {
+                                            <div class="h-100 d-flex align-items-center justify-content-center text-muted">
+                                                <div class="spinner-border spinner-border-sm me-2"></div>
+                                                <span>Loading PDF Preview...</span>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="h-100 d-flex flex-column align-items-center justify-content-center text-muted border border-dashed rounded p-5">
+                                <i class="bi bi-cursor-fill display-4 mb-3 opacity-25"></i>
+                                <p>Select a submission from the list to begin evaluation.</p>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private List<Offer> offers = new();
+    private Offer selectedOffer = null;
+    private Bid currentBid;
+    private string selectedBidId = "";
+    private bool isLoading = true;
+    private FirestoreDb _db;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _db = FirestoreDb.Create(Config["Firebase:DB"]);
+        selectedBidId = bidTracker.getCurrentBidId();
+        currentBid = new Bid();
+
+        if (string.IsNullOrEmpty(selectedBidId))
+        {
+            Nav.NavigateTo("/bidsOrganizor");
+            return;
+        }
+
+        await loadBid(selectedBidId);
+        await loadPDF();
+        await LoadOffers();
+        isLoading = false;
+    }
+
+    private async Task loadBid(string bidID)
+    {
+        Query query = _db.Collection("Bids").WhereEqualTo("Id", bidID).Limit(1);
+        QuerySnapshot snapshot = await query.GetSnapshotAsync();
+
+        if (snapshot.Documents.Count > 0)
+        {
+            DocumentSnapshot biddoc = snapshot.Documents[0];
+            currentBid = new Bid { Id = bidID };
+
+            biddoc.TryGetValue("Description", out string desc); currentBid.Description = desc;
+            biddoc.TryGetValue("Category", out string cat); currentBid.Category = cat;
+            biddoc.TryGetValue("Open", out bool isOpen); currentBid.open = isOpen;
+            biddoc.TryGetValue("fileName", out string fName); currentBid.fileName = fName;
+            biddoc.TryGetValue("WinnerOfferId", out string winnerOfferId); currentBid.WinnerOfferId = winnerOfferId;
+            biddoc.TryGetValue("Quantity", out int qty); currentBid.Quantity = qty == 0 ? 1 : qty;
+            biddoc.TryGetValue("EstimatedBudget", out double budget); currentBid.EstimatedBudget = budget;
+            biddoc.TryGetValue("TechnicalRequirements", out string techReq); currentBid.TechnicalRequirements = techReq;
+            biddoc.TryGetValue("DeliveryLocation", out string location); currentBid.DeliveryLocation = location;
+            biddoc.TryGetValue("dueDate", out DateTime dDate); currentBid.dueDate = dDate;
+        }
+    }
+
+    private async Task loadPDF()
+    {
+        var bucket = Config["Firebase:Bucket"];
+        var storage = new FirebaseStorage(bucket, new FirebaseStorageOptions { AuthTokenAsyncFactory = () => Task.FromResult(authService.CurrentUserToken) });
+
+        try
+        {
+            currentBid.PdfUrl = await storage.Child("Bids").Child(currentBid.Id).Child(currentBid.fileName).GetDownloadUrlAsync();
+        }
+        catch (Exception e) { Console.WriteLine(e.Message); }
+    }
+
+    private async Task LoadOffers()
+    {
+        try
+        {
+            Query query = _db.Collection("Offers").WhereEqualTo("bidID", selectedBidId);
+            QuerySnapshot snapshot = await query.GetSnapshotAsync();
+            var tempList = new List<Offer>();
+
+            foreach (var d in snapshot.Documents)
+            {
+                var offer = new Offer();
+                if (d.TryGetValue("Id", out string id)) offer.Id = id;
+                if (d.TryGetValue("bidID", out string bId)) offer.bidID = bId;
+                if (d.TryGetValue("supplierEmail", out string email)) offer.supplierEmail = email;
+                if (d.TryGetValue("Organization", out string org)) offer.Organization = org;
+                if (d.TryGetValue("TotalQuoteAmount", out double amount)) offer.TotalQuoteAmount = amount;
+                if (d.TryGetValue("LeadTimeDays", out int leadTime)) offer.LeadTimeDays = leadTime;
+                if (d.TryGetValue("PaymentTerms", out string terms)) offer.PaymentTerms = terms;
+                if (d.TryGetValue("TechnicalSpecifications", out string specs)) offer.TechnicalSpecifications = specs;
+                if (d.TryGetValue("fileName", out string fName)) offer.fileName = fName;
+                tempList.Add(offer);
+            }
+            offers = tempList;
+        }
+        catch (Exception ex) { Console.WriteLine($"Error: {ex.Message}"); }
+    }
+
+    private async Task SelectOffer(Offer offer)
+    {
+        selectedOffer = offer;
+        var bucket = Config["Firebase:Bucket"];
+        var storage = new FirebaseStorage(bucket, new FirebaseStorageOptions { AuthTokenAsyncFactory = () => Task.FromResult(authService.CurrentUserToken) });
+
+        try
+        {
+            selectedOffer.pdfURL = await storage.Child("Offers").Child(selectedOffer.bidID).Child(selectedOffer.supplierEmail).Child(selectedOffer.fileName).GetDownloadUrlAsync();
+        }
+        catch (Exception ex) { Console.WriteLine(ex.Message); }
+    }
+
+    private async Task AwardBid()
+    {
+        if (selectedOffer == null) return;
+        if (currentBid.WinnerOfferId != null)
+        {
+            await JS.InvokeVoidAsync("alert", "Bid already awarded to an offer.");
+            return;
+        }
+        bool confirm = await JS.InvokeAsync<bool>("confirm", $"Are you sure you want to award the contract to {selectedOffer.Organization} for {selectedOffer.TotalQuoteAmount.ToString("C")}?");
+
+        if (confirm)
+        {
+            try
+            {
+                // set Open to false and store Winner details
+                Query bidQuery = _db.Collection("Bids").WhereEqualTo("Id", selectedBidId).Limit(1);
+                QuerySnapshot bidSnap = await bidQuery.GetSnapshotAsync();
+
+                if (bidSnap.Documents.Count > 0)
+                {
+                    await bidSnap.Documents[0].Reference.UpdateAsync(new Dictionary<string, object>
+                    {
+                        { "Open", false },
+                        { "WinnerOfferId", selectedOffer.Id },                        
+                        { "decidedPrice", selectedOffer.TotalQuoteAmount },
+                        { "AwardedAt", DateTime.UtcNow },
+                        {"awarded", true}
+                    });
+                }
+
+                // Update the specific Offer to indicate it won
+                Query offerQuery = _db.Collection("Offers").WhereEqualTo("Id", selectedOffer.Id).Limit(1);
+                QuerySnapshot offerSnap = await offerQuery.GetSnapshotAsync();
+
+                if (offerSnap.Documents.Count > 0)
+                {
+                    await offerSnap.Documents[0].Reference.UpdateAsync("Status", "Accepted");
+                }
+
+                await JS.InvokeVoidAsync("alert", "Contract Awarded Successfully!");
+                Nav.NavigateTo("/bidsOrganizor");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error Awarding Bid: {ex.Message}");
+                await JS.InvokeVoidAsync("alert", "Error finalizing decision.");
+            }
+        }
+    }
+}

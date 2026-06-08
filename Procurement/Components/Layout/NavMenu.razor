@@ -1,0 +1,107 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@rendermode InteractiveServer
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">Procurement</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+
+
+    <nav class="nav flex-column">        
+        
+        <AuthorizeView Roles="Admin">
+                   
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="createOrganizor">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> create an Organizor
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        <AuthorizeView Roles="Admin">
+                   
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="categories">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Manage Categories
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <AuthorizeView Roles="Admin">
+        <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="PendingReg">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Approve suppliers
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <AuthorizeView Roles="Organizor">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="BidCreation">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Create Bid
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        <AuthorizeView Roles="Organizor">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="procurementRecords">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> View Records
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <AuthorizeView Roles="Organizor">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="bidsOrganizor">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Bids
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        <AuthorizeView Roles="Organizor,Supplier">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="validatePdf">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Validate Document
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <AuthorizeView Roles="Supplier">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="AvailableBids">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Bids
+                    </NavLink>
+                </div>
+            </Authorized>
+            
+        </AuthorizeView>
+        <AuthorizeView Roles="Supplier">
+            <Authorized >
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="myAwardedOffers">
+                        <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Status
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+    </nav>    
+</div>
+

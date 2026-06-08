@@ -1,0 +1,272 @@
+﻿@page "/AvailableBids"
+@using Procurement.Components.Model
+@using Google.Cloud.Firestore
+@using Firebase.Storage
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@inject BidTracker bidTracker
+@inject AuthService authService
+
+<div class="design-wrapper">
+    <div class="design-card table-card">
+        <div class="close-icon">&times;</div>
+        <h3 class="form-title">Available Bids</h3>
+
+        @if (bids == null)
+        {
+            <div class="loading-state">
+                <div class="spinner-border text-info" role="status"></div>
+                <p>Loading bids from Firestore...</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table custom-table">
+                    <thead>
+                        <tr>
+                            <th>Description</th>
+                            <th>Category</th>
+                            <th>Due Date</th>
+                            <th>Status</th>
+                            <th>Public</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var bid in bids)
+                        {
+                            <tr>
+                                <td>@bid.Description</td>
+                                <td><span class="badge-custom">@bid.Category</span></td>
+                                <td>@bid.dueDate.ToShortDateString()</td>
+                                <td>
+                                    @if (bid.open)
+                                    {
+                                        <span class="status-open">Open</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-closed">Closed</span>
+                                    }
+                                </td>
+                                <td>@(bid.Public ? "Yes" : "No")</td>
+                                <td>
+                                    <button class="btn-action" @onclick="() => makeOffer(bid)">
+                                        Make Offer
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            
+        }
+    </div>
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="error-msg mt-3">
+            <i class="bi bi-exclamation-triangle"></i> @errorMessage
+        </div>
+    }
+</div>
+
+@code {
+    private List<Bid> bids= new List<Bid>();
+    private FirestoreDb _db ;
+    private string errorMessage = "";
+    private bool offerMade;
+    private string currentEmail = "";    
+
+    protected override async Task OnInitializedAsync()
+    {        
+        int retries = 0;
+        while (authService.CurrentUser == null && retries < 5)
+        {
+            await Task.Delay(100);
+            retries++;
+        }
+        
+        if (authService.CurrentUser != null)
+        {
+            currentEmail = authService.CurrentUser.Email;
+            _db = FirestoreDb.Create(Config["Firebase:DB"]);
+            await loadBids();
+           
+        }
+        else
+        {            
+            errorMessage = "Session expired. Please log in again.";
+            //Nav.NavigateTo("/login");
+        }
+        
+        
+
+        //await loadPDFs();
+        //await loadBids();
+        
+
+    }
+    private async Task loadBids()
+    {        
+        try
+        {
+            var snapshot = await _db.Collection("Bids").GetSnapshotAsync();
+            var bidList = new List<Bid>();
+
+            foreach (var d in snapshot.Documents)
+            {
+                // Extract values safely
+                var id = d.GetValue<string>("Id");
+                var dueDate = d.GetValue<DateTime>("dueDate");
+                var isCurrentlyOpen = d.GetValue<bool>("Open");
+                
+                d.TryGetValue<bool>("Public", out var isCurrentlyPublic);
+                
+
+                
+                bool shouldBeOpen = DateTime.Now <= dueDate;
+
+                if (isCurrentlyOpen && !shouldBeOpen)
+                {
+                    // Update the specific document in Firestore
+                    await d.Reference.UpdateAsync("Open", false);
+                    isCurrentlyOpen = false; 
+                }
+
+                if (!d.TryGetValue<List<string>>("supliersList", out var suppliers))
+                {
+                   
+                    suppliers = new List<string>();
+                }
+                
+                bidList.Add(new Bid
+                {
+                    Id = id,
+                    Description = d.GetValue<string>("Description"),
+                    Category = d.GetValue<string>("Category"),
+                    open = isCurrentlyOpen,
+                    Public = isCurrentlyPublic,
+                    Published = d.GetValue<bool>("Published"),
+                    dueDate = dueDate,
+                    fileName = d.GetValue<string>("fileName"),
+                    supliersList = suppliers
+                });
+            }
+            foreach (Bid bid in bidList)
+            {
+                if (bid.open)
+                {
+                    if (bid.Public)
+                    {
+                        bids.Add(bid);
+                    }
+                    else
+                    {
+                        if (bid.supliersList.Contains(currentEmail))
+                        {
+                            bids.Add(bid);
+                        }
+                    }
+                }
+            }
+            //bids = bidList;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading/updating bids: {ex.Message}");
+        }
+    }    
+
+
+    private async Task loadPDFs()
+    {
+        var bucket = Config["Firebase:Bucket"];
+
+
+        var storage = new FirebaseStorage(bucket, new FirebaseStorageOptions
+            {
+                AuthTokenAsyncFactory = () => Task.FromResult(authService.CurrentUserToken)
+            });
+
+        foreach (Bid bid in bids)
+        {
+            try
+            {
+                bid.PdfUrl = await storage
+                .Child("Bids")
+                .Child(bid.Id)                
+                .Child(bid.fileName)
+                .GetDownloadUrlAsync();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+        }
+
+    }
+
+    private async Task makeOffer(Bid bid)
+    {
+        if (bid.open)
+        {
+            await checkIfOfferisMade(bid.Id);
+            if (offerMade)
+            {
+                errorMessage = "You already made an offer for this bid.";
+                
+            }
+            else
+            {
+                bidTracker.setCurrentBidId(bid.Id);
+                Nav.NavigateTo("/makingOffer");
+            }
+
+        }
+        else
+        {
+            errorMessage = "This Bid is now closed ";
+        }
+    }
+
+    private async Task checkIfOfferisMade(string bidId)
+    {
+        List<Offer> offersList = new List<Offer>();
+
+        CollectionReference offersRef = _db.Collection("Offers");
+
+        Query query = offersRef.WhereEqualTo("bidID", bidId);
+
+        QuerySnapshot snapshot = await query.GetSnapshotAsync();
+
+
+        foreach (DocumentSnapshot document in snapshot.Documents)
+        {
+            if (document.Exists)
+            {
+                offersList.Add(new Offer
+                {
+                    Id = document.GetValue<string>("Id"),
+                    bidID = document.GetValue<string>("bidID"),
+                    fileName = document.GetValue<string>("fileName"),
+                    supplierEmail = document.GetValue<string>("supplierEmail"),
+                });               
+                
+            }
+        }
+        foreach (Offer offer in offersList)
+        {
+            if (offer.supplierEmail == currentEmail)
+            {
+                offerMade= true;
+                return;
+            }
+        }
+
+        offerMade= false;
+        return;
+    }
+}
