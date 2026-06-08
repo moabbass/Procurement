@@ -41,16 +41,24 @@ public class AuthService : IAuthService
 
     public string GetRoleFromToken(string idToken)
     {
+        
         var handler = new JwtSecurityTokenHandler();
         var jwtToken = handler.ReadJwtToken(idToken);
 
         
         var roleClaim = jwtToken.Claims.FirstOrDefault(c => c.Type == "role");
-
-        if(CurrentUser.Email.ToLower() == "mohamedabbassit@gmail.com")
+        try
         {
-            return "Admin";
+            if (CurrentUser.Email.ToLower() == "mohamedabbassit@gmail.com")
+            {
+                return "Admin";
+            }
         }
+        catch
+        {
+            Console.WriteLine("test");
+        }
+        
 
         return roleClaim?.Value ?? "User";
     }
